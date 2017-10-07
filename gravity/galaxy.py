@@ -13,7 +13,7 @@ import OpenGL.arrays.vbo as glvbo
 import pyopencl as cl
 from pyopencl.tools import get_gl_sharing_context_properties
 from pyfft.cl import Plan
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 
 N=1*1e6
@@ -162,8 +162,8 @@ __kernel void tocomplex(
 
 clkergravity = """
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define G 1.0f/4
-#define Geps G/6
+#define GRAVITY 1.0f/4
+#define Geps GRAVITY/6
 #define D2 512
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 __kernel void gravity(
@@ -181,7 +181,7 @@ __kernel void gravity(
     float cx=px-D2;
     float cy=py-D2;
 
-    float dist = (G)/(pow(cx*cx+cy*cy,1.15f)+Geps);
+    float dist = (GRAVITY)/(pow(cx*cx+cy*cy,1.15f)+Geps);
   
     out[id2]=dist*d[id2];
     out[id2+1]=dist*d[id2+1];
@@ -190,14 +190,13 @@ __kernel void gravity(
 
 clkerpotential = """
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define GRAVITY 1.0f
-#define PRESSURE 1.0f/50000
+#define PRESSURE 1.0f/50000000
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 __kernel void potential(
     __global const float *pgravity, __global const int *pdensity,  __global float *out)
 {
     int p = get_global_id(0);  
-    out[p] = (-(pdensity[p]/1000.0f)*PRESSURE+pgravity[p*2]*GRAVITY)/1000;
+    out[p] = (-pdensity[p]*PRESSURE+pgravity[p*2])/1000;
 }
 """
 
@@ -224,7 +223,7 @@ __kernel void grad(
 
 clkeracceleration = """
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define FRICTION 0.0075f
+#define FRICTION 0.01f
 #define D 1024
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 __kernel void acceleration(

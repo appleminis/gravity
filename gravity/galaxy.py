@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """
 Created on Thu May 25 17:09:37 2017
@@ -16,7 +17,7 @@ from pyfft.cl import Plan
 #import matplotlib.pyplot as plt
 
 
-N=1*1e6
+N=10000000
 D=1024
 
 
@@ -162,7 +163,7 @@ __kernel void tocomplex(
 
 clkergravity = """
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define GRAVITY 1.0f/4
+#define GRAVITY 1.0f/40
 #define Geps GRAVITY/6
 #define D2 512
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -190,7 +191,7 @@ __kernel void gravity(
 
 clkerpotential = """
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define PRESSURE 1.0f/50000000
+#define PRESSURE 1.0f/200000000
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 __kernel void potential(
     __global const float *pgravity, __global const int *pdensity,  __global float *out)
@@ -223,7 +224,7 @@ __kernel void grad(
 
 clkeracceleration = """
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define FRICTION 0.01f
+#define FRICTION 0.005f
 #define D 1024
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 __kernel void acceleration(
@@ -422,7 +423,7 @@ class GLPlotWidget(QGLWidget):
         # clear the GL scene
         gl.glClear(gl.GL_COLOR_BUFFER_BIT)
         # set yellow color for subsequent drawing rendering calls
-        gl.glColor4f(0.8,0.9,1,0.075)
+        gl.glColor4f(0.5,0.7,0.8,0.01)
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendEquationSeparate( gl.GL_FUNC_ADD,  gl.GL_FUNC_ADD);
         gl.glBlendFuncSeparate(gl.GL_SRC_ALPHA,gl.GL_ONE_MINUS_SRC_ALPHA, gl.GL_ONE,    gl.GL_ONE, gl.GL_ZERO);

@@ -27,5 +27,25 @@
 
 	ipython gravity/galaxy.py
 
-![Logo](/capture.png)
+## Install
 
+	sudo apt install ipython
+	sudo apt install python-pip
+	apt-cache search pyqt
+	sudo apt-get install python-qt4
+	sudo apt-get install libqt4-opengl
+	sudo apt-get install python-qt4-gl
+	sudo apt install ocl-icd-opencl-dev
+	pip install numpy
+	pip install pyopengl
+	pip install pyfft
+	sudo apt install python-cffi
+
+	git clone https://github.com/inducer/pyopencl.git
+	cd pyopencl/
+	python configure.py --cl-enable-gl
+	make -j 31
+	sudo make install
+
+
+![Logo](/capture.png)

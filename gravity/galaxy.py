@@ -17,7 +17,7 @@ from pyfft.cl import Plan
 
 import cv2
 
-N=int(1*1e6)
+N=int(5*1e6)
 D=int(1024)
 
 ENC=1
@@ -162,8 +162,8 @@ __kernel void tocomplex(
 
 clkergravity = """
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define GRAVITY 1.0f/10
-#define Geps GRAVITY/3
+#define GRAVITY 1.0f/50
+#define Geps GRAVITY/2
 #define D2 512
 #define DS 1
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -178,11 +178,10 @@ __kernel void gravity(
             
     px+=(px<D2 ? D2:-D2);
     py+=(py<D2 ? D2:-D2);
-    
     float cx=px-D2;
     float cy=py-D2;
 
-    float dist = GRAVITY/(powr((cx*cx+cy*cy),1.3f)*DS+Geps);
+    float dist = GRAVITY/(powr((cx*cx+cy*cy),1.1f)*DS+Geps);
   
     out[id2]=dist*d[id2];
     out[id2+1]=dist*d[id2+1];
@@ -191,13 +190,13 @@ __kernel void gravity(
 
 clkerpotential = """
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define PRESSURE 1.0f/500000
+#define PRESSURE 1.0f/10000000
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 __kernel void potential(
     __global const float *pgravity, __global const int *pdensity,  __global float *out)
 {
     int p = get_global_id(0); 
-    float d=pow(pdensity[p]/1000.0f,1.5f);
+    float d=pow(pdensity[p]/1000.0f,1.6f);
     out[p] = (-d*PRESSURE+pgravity[p*2])/1000;
 }
 """
@@ -225,7 +224,7 @@ __kernel void grad(
 
 clkeracceleration = """
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define FRICTION 0.075f
+#define FRICTION 0.1f
 #define D 1024
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 __kernel void acceleration(
@@ -308,10 +307,10 @@ __kernel void visu(__write_only image2d_t out, __global int* dd, __global float*
    }
    else
    {
-       float m = (float)sqrt(1.0f+density)/12;
+       float m = (float)sqrt(density)/24;
        //float m = (float)log10(1.0f+density)/12;
        float2 v=(float2)(dv[2*(x+y*D)],dv[2*(x+y*D)+1])/dd[(x+y*D)];
-       float dv = sqrt(v.x*v.x+v.y*v.y)*1000;
+       float dv = sqrt(v.x*v.x+v.y*v.y)*750;
        float da = (atan2(v.y,v.x)/3.14159265359f+1.0f)/2;
        
        
@@ -320,8 +319,8 @@ __kernel void visu(__write_only image2d_t out, __global int* dd, __global float*
        
        //float4 val = (float4)(m,m,m, 1.0f);
        
-       float4 rgb=hsv2rgb(dv*360,sqrt(dv),m);
-       //float4 rgb=hsv2rgb((1+cos((da*0+dv)*4*3.14259265359))*180,sqrt(dv+m*2),m);
+       float4 rgb=hsv2rgb((dv*3+m*m)*360/4,sqrt(dv),m);
+       //float4 rgb=hsv2rgb((1+cos((da+dv)*4*3.14259265359))*180,sqrt(dv),m);
 
        write_imagef(out, coords, (float4)(rgb.y, rgb.z, rgb.x, 1.0f));
        dc[(x+D*y)*3+0]=rgb.y*255;
@@ -560,7 +559,8 @@ window = None
 if __name__ == '__main__':
     import sys
     import numpy as np
-    fourcc = cv2.VideoWriter_fourcc(*'MJPG') 
+    #fourcc = cv2.VideoWriter_fourcc(*'MJPG') 
+    fourcc = cv2.cv.CV_FOURCC(*'XVID')
     if (ENC):
         vid=cv2.VideoWriter('./output.avi',fourcc, 20.0, (D,D))
     else:
@@ -574,13 +574,13 @@ if __name__ == '__main__':
             if (10):
                 self.data = (np.random.rand(N,2)-.5)/2+.5
                 theta = np.random.rand(N)*2*np.pi
-                radius = pow(np.sqrt(np.random.rand(N)),1.5)/5
+                radius = pow(np.sqrt(np.random.rand(N)),1.75)/5
                 self.data[:,0]=np.cos(theta)*radius+.5
                 self.data[:,1]=np.sin(theta)*radius+.5
                 self.datat=np.empty_like(self.data)
                 self.datat[:,1]=self.data[:,0]-.5
                 self.datat[:,0]=-self.data[:,1]+.5
-                self.datavit = (np.random.rand(N,2)-.5)/100/15+self.datat/100/((0.125+radius[:,None]))/7
+                self.datavit = (np.random.rand(N,2)-.5)/100/7+self.datat/100/((0.125+radius[:,None]))/7
                 self.data = np.array(self.data, dtype=np.float32)
                 self.datavit = np.array(self.datavit, dtype=np.float32)
             else:

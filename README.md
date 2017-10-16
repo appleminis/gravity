@@ -2,7 +2,7 @@
 
 ## Overview
 	Python OpenCL "gravitational" "fluid" simulation
-	Not real gravitational potential : G/(D^2.3+eps) ( too much spreading speeds with G/(D+eps) )
+	Not real gravitational potential ( too much spreading speeds with G/(D+eps) )
 	Pressure potential : -Density*PRESSURE
 	Friction affect particles velocity sharing same discrete location
 
@@ -43,8 +43,8 @@
 
 	git clone https://github.com/inducer/pyopencl.git
 	cd pyopencl/
-	python configure.py --cl-enable-gl
-	make -j 31
+	python configure.py --cl-enable-gl --cl-pretend-version=1.2
+	make -j 8
 	sudo make install
 
 

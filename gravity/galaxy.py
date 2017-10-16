@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 """
 Created on Thu May 25 17:09:37 2017
@@ -16,10 +15,12 @@ from pyopencl.tools import get_gl_sharing_context_properties
 from pyfft.cl import Plan
 #import matplotlib.pyplot as plt
 
+import cv2
 
-N=10000000
-D=1024
+N=int(1*1e6)
+D=int(1024)
 
+ENC=1
 
 clkernel = """
 __kernel void clkernel(__global float2* clpos, __global float2* glpos)
@@ -104,6 +105,10 @@ __kernel void density(__global float2* clpos, __global float2* clvit, __global i
     float vx=clvit[i].x;
     float vy=clvit[i].y;
     
+    //calculate pressure in the "future"
+    px+=vx;
+    py+=vy;
+    
     int ix=px;
     int iy=py;
     
@@ -119,29 +124,23 @@ __kernel void density(__global float2* clpos, __global float2* clvit, __global i
         atomic_xchg(&d[p/2],av+1);*/
 
         
-        atomic_add(&d[ix+D*iy],(int)((1-dx)*(1-dy)*1000*(99999*(i==-1)+1)));
-        atomic_add(&d[ix+D*iy+1],(int)((dx)*(1-dy)*1000*(99999*(i==-1)+1)));
-        atomic_add(&d[ix+D*iy+D+1],(int)((dx)*(dy)*1000*(99999*(i==-1)+1)));
-        atomic_add(&d[ix+D*iy+D],(int)((1-dx)*(dy)*1000*(99999*(i==-1)+1)));
+        atomic_add(&d[ix+D*iy],(int)((1-dx)*(1-dy)*1000));
+        atomic_add(&d[ix+D*iy+1],(int)((dx)*(1-dy)*1000));
+        atomic_add(&d[ix+D*iy+D+1],(int)((dx)*(dy)*1000));
+        atomic_add(&d[ix+D*iy+D],(int)((1-dx)*(dy)*1000));
         
-        /*atomic_add(&dv[2*(ix+D*iy)],(int)((1-dx)*(1-dy)*10000*vx));
-        atomic_add(&dv[2*(ix+D*iy+1)],(int)((dx)*(1-dy)*10000*vx));
-        atomic_add(&dv[2*(ix+D*iy+D+1)],(int)((dx)*(dy)*10000*vx));
-        atomic_add(&dv[2*(ix+D*iy+D)],(int)((1-dx)*(dy)*10000*vx));
-
-        atomic_add(&dv[2*(ix+D*iy)+1],(int)((1-dx)*(1-dy)*10000*vy));
-        atomic_add(&dv[2*(ix+D*iy+1)+1],(int)((dx)*(1-dy)*10000*vy));
-        atomic_add(&dv[2*(ix+D*iy+1025)+1],(int)((dx)*(dy)*10000*vy));
-        atomic_add(&dv[2*(ix+D*iy+D)+1],(int)((1-dx)*(dy)*10000*vy));*/
+        px-=vx;
+        py-=vy;
+        
+        ix=px;
+        iy=py;
+    
+        dx=px-ix;
+        dy=py-iy;
         
         atomicAdd_g_f(&dv[p], vx);
         atomicAdd_g_f(&dv[p+1], vy);
         atomic_add(&dd[p/2],1);
-        
-        /*avx = dv[p];
-        atomic_xchg(&dv[p],avx+vx);
-        avy = dv[p+1];
-        atomic_xchg(&dv[p+1],avy+vy);*/
 
     }
 }
@@ -163,9 +162,10 @@ __kernel void tocomplex(
 
 clkergravity = """
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define GRAVITY 1.0f/40
-#define Geps GRAVITY/6
+#define GRAVITY 1.0f/10
+#define Geps GRAVITY/3
 #define D2 512
+#define DS 1
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 __kernel void gravity(
     __global const float *d, __global float *out)
@@ -182,7 +182,7 @@ __kernel void gravity(
     float cx=px-D2;
     float cy=py-D2;
 
-    float dist = (GRAVITY)/(pow(cx*cx+cy*cy,1.15f)+Geps);
+    float dist = GRAVITY/(powr((cx*cx+cy*cy),1.3f)*DS+Geps);
   
     out[id2]=dist*d[id2];
     out[id2+1]=dist*d[id2+1];
@@ -191,13 +191,14 @@ __kernel void gravity(
 
 clkerpotential = """
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define PRESSURE 1.0f/200000000
+#define PRESSURE 1.0f/500000
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 __kernel void potential(
     __global const float *pgravity, __global const int *pdensity,  __global float *out)
 {
-    int p = get_global_id(0);  
-    out[p] = (-pdensity[p]*PRESSURE+pgravity[p*2])/1000;
+    int p = get_global_id(0); 
+    float d=pow(pdensity[p]/1000.0f,1.5f);
+    out[p] = (-d*PRESSURE+pgravity[p*2])/1000;
 }
 """
 
@@ -224,7 +225,7 @@ __kernel void grad(
 
 clkeracceleration = """
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define FRICTION 0.005f
+#define FRICTION 0.075f
 #define D 1024
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 __kernel void acceleration(
@@ -255,6 +256,84 @@ __kernel void acceleration(
 }
 """
 
+clkervisu = """
+#define D 1024
+
+
+inline float4 hsv2rgb(float H, float S, float V)
+{
+    float P, Q, T, fract;
+    if (H>=360)
+        H=0;
+    else
+        H /= 60;
+    fract = H - floor(H);
+
+    P = V*(1.0f - S);
+    Q = V*(1.0f - S*fract);
+    T = V*(1.0f - S*(1.0f - fract));
+
+    if (0.0f <= H && H < 1.0f)
+        return (float4)(V, T, P, 1.0f);
+    else if (1.0f <= H && H < 2.0f)
+        return (float4)(Q, V, P, 1.0f);
+    else if (2.0f <= H && H < 3.0f)
+        return (float4)(P, V, T, 1.0f);
+    else if (3.0f <= H && H < 4.0f)
+        return (float4)(P, Q, V, 1.0f);
+    else if (4.0f <= H && H < 5.0f)
+        return (float4)(T, P, V, 1.0f);
+    else if (5.0f <= H && H < 6.0f)
+        return (float4)(V, P, Q, 1.0f);
+    else
+        return (float4)(0.0f, 0.0f, 0.0f, 1.0f);
+
+}
+    
+
+__kernel void visu(__write_only image2d_t out, __global int* dd, __global float* dv, __global uchar* dc)//, __global int* dd, __global float* dv)
+{
+   int x = get_global_id(0);
+   int y = get_global_id(1); 
+   int2 coords = (int2)(x,y);
+   
+   float density = dd[x+y*1024];
+   if (density==0)
+   {
+       float4 rgb=(float4)0;
+       write_imagef(out, coords, rgb);
+       dc[(x+D*y)*3+0]=rgb.x*255;
+       dc[(x+D*y)*3+1]=rgb.y*255;
+       dc[(x+D*y)*3+2]=rgb.z*255;
+   }
+   else
+   {
+       float m = (float)sqrt(1.0f+density)/12;
+       //float m = (float)log10(1.0f+density)/12;
+       float2 v=(float2)(dv[2*(x+y*D)],dv[2*(x+y*D)+1])/dd[(x+y*D)];
+       float dv = sqrt(v.x*v.x+v.y*v.y)*1000;
+       float da = (atan2(v.y,v.x)/3.14159265359f+1.0f)/2;
+       
+       
+       if (dv>1) dv=1;
+       if (m>1) m=1;
+       
+       //float4 val = (float4)(m,m,m, 1.0f);
+       
+       float4 rgb=hsv2rgb(dv*360,sqrt(dv),m);
+       //float4 rgb=hsv2rgb((1+cos((da*0+dv)*4*3.14259265359))*180,sqrt(dv+m*2),m);
+
+       write_imagef(out, coords, (float4)(rgb.y, rgb.z, rgb.x, 1.0f));
+       dc[(x+D*y)*3+0]=rgb.y*255;
+       dc[(x+D*y)*3+1]=rgb.z*255;
+       dc[(x+D*y)*3+2]=rgb.x*255;
+
+   }
+}
+
+
+"""
+
 def clinit():
     """Initialize OpenCL with GL-CL interop.
     """
@@ -274,13 +353,14 @@ class GLPlotWidget(QGLWidget):
     # default window size
     width, height = D,D
 
-    def set_data(self, data, datavit):
+    def set_data(self, data, datavit, vid):
         """Load 2D data as a Nx2 Numpy array.
         """
         self.data = data
         self.datavit = datavit
-
         self.count = data.shape[0]
+        self.vidout = vid
+
 
     def initialize_buffers(self):
         """Initialize OpenGL and OpenCL buffers and interop objects,
@@ -290,9 +370,25 @@ class GLPlotWidget(QGLWidget):
         self.glbuf = glvbo.VBO(data=np.zeros(self.data.shape),
                                usage=gl.GL_DYNAMIC_DRAW,
                                target=gl.GL_ARRAY_BUFFER)
+        
+        self.idtexgl = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.idtexgl)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D,gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D,gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA8, D, D, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, None);
+
+                   
         self.glbuf.bind()
         # initialize the CL context
         self.ctx, self.queue = clinit()
+        
+        
+        
+        self.clglimage = cl.GLTexture(self.ctx, cl.mem_flags.READ_WRITE,gl.GL_TEXTURE_2D, 0, self.idtexgl, 2)  
+        self.clbufim = cl.Buffer(self.ctx,
+                            cl.mem_flags.READ_WRITE,
+                            size=D*D*3)
+        
         # create a pure read-only OpenCL buffer
         self.clbuf = cl.Buffer(self.ctx,
                             cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR,
@@ -347,13 +443,14 @@ class GLPlotWidget(QGLWidget):
         self.potential = cl.Program(self.ctx, clkerpotential).build()
         self.grad = cl.Program(self.ctx, clkergrad).build()
         self.acceleration = cl.Program(self.ctx, clkeracceleration).build()
-
-
+        self.visu = cl.Program(self.ctx, clkervisu).build()
 
         self.plan = Plan((D,D), queue=self.queue)
-
-
-
+        
+        self.enctime=0
+        self.rdbufint = np.zeros((D*D),np.int32)
+        self.daint = np.zeros((D*D),np.int32)
+        self.rdgl = np.zeros((D,D,3),np.uint8)
         # release the PyOpenCL queue
         self.queue.finish()
 
@@ -373,30 +470,22 @@ class GLPlotWidget(QGLWidget):
         self.grad.grad(self.queue, (D,D), None, self.clbufpotential,self.clbufgrad)
         self.acceleration.acceleration(self.queue, (self.count,), None , self.clbufvit, self.clbuf, self.clbufgrad,self.clbufdensity,self.clbufdensityint,self.clbufdensityvit)
         self.addvit.addvit(self.queue, (self.count,), None, self.clbuf,self.clbufvit)        
+        self.queue.finish()
 
         
-        # get secure access to GL-CL interop objects
-        cl.enqueue_acquire_gl_objects(self.queue, [self.glclbuf])
-        # arguments to the OpenCL kernel
-        kernelargs = (self.clbuf,
-                      self.glclbuf)
-        # execute the kernel
-        self.program.clkernel(self.queue, (self.count,), None, *kernelargs)
-        # release access to the GL-CL interop objects
-        cl.enqueue_release_gl_objects(self.queue, [self.glclbuf])
-        self.queue.finish()
 
 #        self.rdbufvit = np.zeros((D*D*2),np.float32)
 #        cl.enqueue_copy(self.queue, self.rdbufvit, self.clbufdensityvit)
-#        self.rdbufint = np.zeros((D*D),np.int32)
-#        cl.enqueue_copy(self.queue, self.rdbufint, self.clbufdensityint)
-#        self.rvx=np.reshape(self.rdbufvit[::2]/self.rdbufint,(D,D))
-#        self.rvy=np.reshape(self.rdbufvit[1::2]/self.rdbufint,(D,D))
-
-
-        #plt.imshow(np.reshape(self.rdbufvit,(D,D*2)))        
-        
-
+        self.enctime+=1
+        if (np.mod(self.enctime,4)==0 and ENC==1):
+            cl.enqueue_acquire_gl_objects(self.queue, [self.clglimage])
+            self.visu.visu(self.queue, (D,D), None,self.clglimage,self.clbufdensityint,self.clbufdensityvit,self.clbufim)        
+            cl.enqueue_release_gl_objects(self.queue, [self.clglimage])
+            cl.enqueue_copy(self.queue, self.rdgl, self.clbufim)
+            aff = np.reshape(self.rdgl,(D,D,3))
+            self.vidout.write(aff[:,:,::-1].astype('uint8'))
+            
+            
     def update_buffer(self):
         """Update the GL buffer from the CL buffer
         """
@@ -416,25 +505,40 @@ class GLPlotWidget(QGLWidget):
 
     def paintGL(self):
         """Paint the scene.
-        """
-
+        """            
         self.update_buffer()   
-        
-        # clear the GL scene
         gl.glClear(gl.GL_COLOR_BUFFER_BIT)
-        # set yellow color for subsequent drawing rendering calls
-        gl.glColor4f(0.5,0.7,0.8,0.01)
-        gl.glEnable(gl.GL_BLEND)
-        gl.glBlendEquationSeparate( gl.GL_FUNC_ADD,  gl.GL_FUNC_ADD);
-        gl.glBlendFuncSeparate(gl.GL_SRC_ALPHA,gl.GL_ONE_MINUS_SRC_ALPHA, gl.GL_ONE,    gl.GL_ONE, gl.GL_ZERO);
-        # bind the VBO
-        self.glbuf.bind()
-        # tell OpenGL that the VBO contains an array of vertices
-        gl.glEnableClientState(gl.GL_VERTEX_ARRAY)
-        # these vertices contain 2 simple precision coordinates
-        gl.glVertexPointer(2, gl.GL_FLOAT, 0, self.glbuf)
-        # draw "count" points from the VBO
-        gl.glDrawArrays(gl.GL_POINTS, 0, self.count)
+
+        if (np.mod(self.enctime,4)==0 or ENC==0 or 1):
+
+            if (1):
+                
+                gl.glBindTexture(gl.GL_TEXTURE_2D, self.idtexgl)
+                gl.glEnable(gl.GL_TEXTURE_2D)
+                gl.glBegin(gl.GL_QUADS)
+                gl.glTexCoord2f(0.0, 0.0)
+                gl.glVertex2f(0, 0); 
+                gl.glTexCoord2f(1.0, 0.0)
+                gl.glVertex2f( 1.0, 0); 
+                gl.glTexCoord2f(1.0, 1.0)
+                gl.glVertex2f( 1.0, 1.0); 
+                gl.glTexCoord2f(0.0, 1.0)
+                gl.glVertex2f(0, 1.0);
+                gl.glEnd()
+                
+            else:
+                gl.glColor4d(0.5,0.7,0.8,0.04)
+                gl.glEnable(gl.GL_BLEND)
+                gl.glBlendEquationSeparate( gl.GL_FUNC_ADD,  gl.GL_FUNC_ADD);
+                gl.glBlendFuncSeparate(gl.GL_SRC_ALPHA,gl.GL_ONE_MINUS_SRC_ALPHA, gl.GL_ONE,    gl.GL_ONE, gl.GL_ZERO);
+                # bind the VBO
+                self.glbuf.bind()
+                # tell OpenGL that the VBO contains an array of vertices
+                gl.glEnableClientState(gl.GL_VERTEX_ARRAY)
+                # these vertices contain 2 simple precision coordinates
+                gl.glVertexPointer(2, gl.GL_FLOAT, 0, self.glbuf)
+                # draw "count" points from the VBO
+                gl.glDrawArrays(gl.GL_POINTS, 0, self.count)
         
         self.update()
                 
@@ -456,28 +560,48 @@ window = None
 if __name__ == '__main__':
     import sys
     import numpy as np
+    fourcc = cv2.VideoWriter_fourcc(*'MJPG') 
+    if (ENC):
+        vid=cv2.VideoWriter('./output.avi',fourcc, 20.0, (D,D))
+    else:
+        vid=None
 
     # define a Qt window with an OpenGL widget inside it
     class TestWindow(QtGui.QMainWindow):
         def __init__(self):
             super(TestWindow, self).__init__()
             # generate random data points
-            self.data = (np.random.rand(N,2)-.5)/2+.5
-            theta = np.random.rand(N)*2*np.pi
-            radius = np.sqrt(np.random.rand(N))/5
-            self.data[:,0]=np.cos(theta)*radius+.5
-            self.data[:,1]=np.sin(theta)*radius+.5
-            self.datat=np.empty_like(self.data)
-            self.datat[:,1]=self.data[:,0]-.5
-            self.datat[:,0]=-self.data[:,1]+.5
-            self.datavit = (np.random.rand(N,2)-.5)/100/4+self.datat/100/1.2
-            self.data = np.array(self.data, dtype=np.float32)
-            self.datavit = np.array(self.datavit, dtype=np.float32)
-            self.data[0,:]=0.5
-            self.datavit[0,:]=0
+            if (10):
+                self.data = (np.random.rand(N,2)-.5)/2+.5
+                theta = np.random.rand(N)*2*np.pi
+                radius = pow(np.sqrt(np.random.rand(N)),1.5)/5
+                self.data[:,0]=np.cos(theta)*radius+.5
+                self.data[:,1]=np.sin(theta)*radius+.5
+                self.datat=np.empty_like(self.data)
+                self.datat[:,1]=self.data[:,0]-.5
+                self.datat[:,0]=-self.data[:,1]+.5
+                self.datavit = (np.random.rand(N,2)-.5)/100/15+self.datat/100/((0.125+radius[:,None]))/7
+                self.data = np.array(self.data, dtype=np.float32)
+                self.datavit = np.array(self.datavit, dtype=np.float32)
+            else:
+                self.data = (np.random.rand(N,2))
+                self.data = (np.random.rand(N,2)-.5)/2+.5
+                theta = np.random.rand(N)*2*np.pi
+                radius = pow(np.sqrt(np.random.rand(N)),1.5)/2.5
+                self.data[:,0]=np.cos(theta)*radius+.5
+                self.data[:,1]=np.sin(theta)*radius+.5
+                self.data = np.array(self.data, dtype=np.float32)
+                radius = np.sqrt(np.sum((self.data-.5)**2,1))
+                self.datat=np.empty_like(self.data)
+                self.datat[:,1]=self.data[:,0]-.5
+                self.datat[:,0]=-self.data[:,1]+.5
+                self.datavit = (np.random.rand(N,2)-.5)/100/40+self.datat/100/((0.125+radius[:,None]))/17*((radius<0.3)[:,None])
+                self.datavit = np.array(self.datavit, dtype=np.float32)
+
+
             # initialize the GL widget
             self.widget = GLPlotWidget()
-            self.widget.set_data(self.data,self.datavit)
+            self.widget.set_data(self.data,self.datavit,vid)
             # put the window at the screen position (100, 100)
             self.setGeometry(100, 100, self.widget.width, self.widget.height)
             self.setCentralWidget(self.widget)
@@ -488,8 +612,5 @@ if __name__ == '__main__':
     window = TestWindow()
     window.show()
     app.exec_()
-    
-#    import matplotlib.pyplot as plt
-#    dns = np.zeros((D,D),np.complex64)
-#    cl.enqueue_copy(window.widget.queue, dns, window.widget.clbuffft)
-#    plt.imshow(np.abs(dns))
+    if (ENC):
+        vid.release()
